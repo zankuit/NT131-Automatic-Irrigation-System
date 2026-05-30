@@ -16,18 +16,20 @@
 #include <BlynkSimpleEsp32.h>
 
 // ── Thông tin Wifi ──────────────────────────────────────────
-const char* WIFI_SSID = "CameraAnNinh";   // Thay tên Wifi của bạn
-const char* WIFI_PASS = "11223344";    // Thay mật khẩu Wifi
+const char* WIFI_SSID = "Danh Bao";   // Thay tên Wifi của bạn
+const char* WIFI_PASS = "@Mothaiba123";    // Thay mật khẩu Wifi
 
 // ── Chân GPIO ───────────────────────────────────────────────
 #define PIN_SENSOR  34
 #define PIN_RELAY   26
 
 // ── Ngưỡng độ ẩm (căn chỉnh theo thực tế của bạn) ──────────
-#define NGUONG_KHO  2500   // ADC > 2500 → đất khô → bật bơm
-#define NGUONG_AM   1800   // ADC < 1800 → đất ẩm → tắt bơm
-#define ADC_KHO     3050   // Giá trị ADC khi khô hoàn toàn
-#define ADC_UOT     1390   // Giá trị ADC khi ướt hoàn toàn
+#define ADC_KHO     3050
+#define ADC_UOT     1390
+
+// Ngưỡng mặc định theo % (co the doi tu Blynk qua V3/V4)
+#define DEFAULT_NGUONG_BAT_PHAN_TRAM  40
+#define DEFAULT_NGUONG_TAT_PHAN_TRAM  35
 
 // ── Thời gian ────────────────────────────────────────────────
 #define INTERVAL_DOC_SENSOR  2000  // Đọc cảm biến mỗi 2 giây
@@ -37,6 +39,11 @@ const char* WIFI_PASS = "11223344";    // Thay mật khẩu Wifi
 int  mode       = 1;     // 1=Auto (mặc định), 0=Manual
 bool bompDangBat = false; // Trạng thái bơm hiện tại
 int  doAmPhanTram = 0;   // Độ ẩm % hiện tại
+
+int nguongBatPhanTram = DEFAULT_NGUONG_BAT_PHAN_TRAM; // V3
+int nguongTatPhanTram = DEFAULT_NGUONG_TAT_PHAN_TRAM; // V4
+int nguongBatADC = 0;
+int nguongTatADC = 0;
 
 // ── Timer của Blynk ─────────────────────────────────────────
 BlynkTimer timer;
@@ -62,6 +69,18 @@ void tatBom() {
     }
 }
 
+int phanTramSangADC(int phanTram) {
+    phanTram = constrain(phanTram, 0, 100);
+    long span = ADC_KHO - ADC_UOT;
+    long raw = ADC_UOT + (long)(100 - phanTram) * span / 100;
+    return (int)constrain(raw, ADC_UOT, ADC_KHO);
+}
+
+void capNhatNguongADC() {
+    nguongBatADC = phanTramSangADC(nguongBatPhanTram);
+    nguongTatADC = phanTramSangADC(nguongTatPhanTram);
+}
+
 // ============================================================
 //  HÀM CHÍNH: Đọc cảm biến + xử lý Auto
 // ============================================================
@@ -84,9 +103,9 @@ void docCamBienVaXuLy() {
 
     // Chỉ xử lý tự động nếu đang ở chế độ Auto
     if (mode == 1) {
-        if (raw > NGUONG_KHO) {
+        if (raw > nguongBatADC) {
             batBom();
-        } else if (raw < NGUONG_AM) {
+        } else if (raw < nguongTatADC) {
             tatBom();
         }
         // Vùng trung gian: giữ nguyên trạng thái (hysteresis)
@@ -96,6 +115,7 @@ void docCamBienVaXuLy() {
 // ============================================================
 //  BLYNK: Nhận lệnh từ Switch V0 (Water Pump)
 // ============================================================
+
 BLYNK_WRITE(V0) {
     if (mode == 0) {  // Chỉ xử lý khi đang Manual
         int lenh = param.asInt();
@@ -116,6 +136,7 @@ BLYNK_WRITE(V0) {
 // ============================================================
 //  BLYNK: Nhận lệnh từ Switch V2 (Mode)
 // ============================================================
+
 BLYNK_WRITE(V2) {
     mode = param.asInt();
     Serial.print("[MODE] Chuyen sang: ");
@@ -129,23 +150,49 @@ BLYNK_WRITE(V2) {
 }
 
 // ============================================================
+//  BLYNK: Nhap nguong theo %
+//  V3: nguong bat, V4: nguong tat
+// ============================================================
+
+BLYNK_WRITE(V3) {
+    nguongBatPhanTram = param.asInt();
+    capNhatNguongADC();
+    Serial.print("[NGUONG] Bat %: ");
+    Serial.print(nguongBatPhanTram);
+    Serial.print(" | ADC: ");
+    Serial.println(nguongBatADC);
+}
+
+BLYNK_WRITE(V4) {
+    nguongTatPhanTram = param.asInt();
+    capNhatNguongADC();
+    Serial.print("[NGUONG] Tat %: ");
+    Serial.print(nguongTatPhanTram);
+    Serial.print(" | ADC: ");
+    Serial.println(nguongTatADC);
+}
+
+// ============================================================
 //  BLYNK: Đồng bộ trạng thái khi ESP32 mới kết nối
 // ============================================================
 BLYNK_CONNECTED() {
     // Lấy trạng thái hiện tại của các switch từ Blynk Cloud
     // về ESP32 (quan trọng khi ESP32 bị reset)
-    Blynk.syncVirtual(V0, V2);
+    Blynk.syncVirtual(V0, V2, V3, V4);
     Serial.println("[BLYNK] Da ket noi, dong bo trang thai...");
 }
 
 // ============================================================
 //  SETUP
 // ============================================================
+
 void setup() {
     Serial.begin(115200);
 
     pinMode(PIN_RELAY, OUTPUT);
     digitalWrite(PIN_RELAY, LOW);  // Tắt bơm ngay khi khởi động
+
+    capNhatNguongADC();
 
     Serial.println("=== He thong tuoi tu dong khoi dong ===");
 

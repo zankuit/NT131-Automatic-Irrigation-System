@@ -6,7 +6,7 @@
 - Giảng viên hướng dẫn: ThS. Lê Minh Khánh Hội
 - Học kỳ II Năm học 2025-2026
 
-## Thành viên
+## Thành viên Nhóm 3
 | STT | Họ và tên | MSSV |
 | --- | --- | --- |
 | 1 | Nguyễn Tiến Vĩnh | 24522022 |
